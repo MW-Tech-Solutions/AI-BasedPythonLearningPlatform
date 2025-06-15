@@ -4,8 +4,9 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import type { Lesson, LessonContentPart, Exercise } from "@/lib/types";
-import { ArrowLeft, ArrowRight, Check, Lightbulb, MessageSquare, Sparkles, Code } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Lightbulb, MessageSquare, Sparkles, Code, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import React, { useEffect, useState, Suspense } from "react";
@@ -99,12 +100,12 @@ function ExerciseAttempt({ exercise, onSubmit }: { exercise: Exercise; onSubmit:
   const [code, setCode] = useState(exercise.starterCode);
   const [output, setOutput] = useState<string | null>(null); // Placeholder for code execution output
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null); // Placeholder
-
+  const { user } = useAuth(); 
   const handleRunCode = () => {
     // Placeholder for actual code execution
     // For now, just simulate output and check if it's "Hello World" for first exercise
     setOutput(`Simulated output for: \n${code}`);
-    if (exercise.id === "ex1-1" && code.includes(`print("${useAuth().user?.displayName || 'Your Name'}")`)) {
+    if (exercise.id === "ex1-1" && code.includes(`print("${user?.displayName || 'Your Name'}")`)) {
       setIsCorrect(true);
     } else if (exercise.id === "ex1-1" && code.includes('print("')) { // basic check
       setIsCorrect(Math.random() > 0.5); // Random success for demo
