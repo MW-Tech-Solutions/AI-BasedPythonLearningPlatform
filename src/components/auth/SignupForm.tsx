@@ -65,6 +65,8 @@ export function SignupForm() {
         progress: {
           completedLessons: [],
           exerciseScores: {},
+          quizScores: {}, // Ensure quizScores is initialized
+          currentLesson: "1", // Default to first lesson, or handle differently
         }
       });
       

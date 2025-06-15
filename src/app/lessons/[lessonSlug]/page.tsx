@@ -5,7 +5,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import type { Lesson, LessonContentPart, Exercise } from "@/lib/types";
+import type { Lesson, LessonContentPart, Exercise, UserProgress } from "@/lib/types";
 import { ArrowLeft, ArrowRight, Check, Lightbulb, MessageSquare, Sparkles, Code, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -281,276 +281,140 @@ const mockLessons: Lesson[] = [
   }
 ];
 
-function LessonContentDisplay({ content }: { content: LessonContentPart[] }) {
-  return (
-    <div className="prose prose-lg max-w-none dark:prose-invert">
-      {content.map((part, index) => {
-        if (part.type === "heading") {
-          const Tag = `h${part.level || 2}` as keyof JSX.IntrinsicElements;
-          return <Tag key={index} className="font-headline mt-6 mb-3">{part.value}</Tag>;
-        }
-        if (part.type === "text") {
-          return <p key={index}>{part.value}</p>;
-        }
-        if (part.type === "code") {
-          return (
-            <pre key={index} className="bg-muted p-4 rounded-md overflow-x-auto text-sm">
-              <code className={`language-${part.language || "python"}`}>{part.value}</code>
-            </pre>
-          );
-        }
-        return null;
-      })}
-    </div>
-  );
-}
 
-function ExerciseAttempt({ exercise, onSubmit }: { exercise: Exercise; onSubmit: (exerciseId: string, code: string) => void }) {
-  const [code, setCode] = useState(exercise.starterCode);
-  const [output, setOutput] = useState<string | null>(null); // Placeholder for code execution output
-  const [isCorrect, setIsCorrect] = useState<boolean | null>(null); // Placeholder
-  const { user } = useAuth(); 
-  const handleRunCode = () => {
-    // Placeholder for actual code execution
-    // For now, just simulate output and check if it's "Hello World" for first exercise
-    setOutput(`Simulated output for: \n${code}`);
-    if (exercise.id === "ex1-1" && code.includes(`print("${user?.displayName || 'Your Name'}")`)) {
-      setIsCorrect(true);
-    } else if (exercise.id === "ex1-1" && code.includes('print("')) { // basic check
-      setIsCorrect(Math.random() > 0.5); // Random success for demo
-    } else {
-      setIsCorrect(false);
-    }
-    onSubmit(exercise.id, code); // Notify parent about submission
-  };
-
-  return (
-    <Card className="mt-6 shadow-md">
-      <CardHeader>
-        <CardTitle className="text-lg font-semibold">Exercise: {exercise.description}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Textarea
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="Write your Python code here..."
-          className="min-h-[150px] font-code text-sm bg-background border rounded-md"
-          aria-label={`Code editor for exercise: ${exercise.description}`}
-        />
-        <Button onClick={handleRunCode} className="mt-4">
-          <Code className="mr-2 h-4 w-4"/> Run Code
-        </Button>
-        {output && (
-          <Alert className="mt-4" variant={isCorrect === null ? "default" : isCorrect ? "default" : "destructive"}>
-            <Sparkles className="h-4 w-4" />
-            <AlertTitle>{isCorrect === null ? "Output" : isCorrect ? "Correct!" : "Needs Improvement"}</AlertTitle>
-            <AlertDescription className="whitespace-pre-wrap font-code text-sm">{output}</AlertDescription>
-          </Alert>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ChatbotWidget() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [question, setQuestion] = useState("");
-  const [chatHistory, setChatHistory] = useState<{ type: 'user' | 'ai'; text: string }[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const { toast } = useToast();
-
-  const handleSendMessage = async () => {
-    if (!question.trim()) return;
-    
-    const newHistory = [...chatHistory, { type: 'user' as 'user', text: question }];
-    setChatHistory(newHistory);
-    setQuestion("");
-    setIsLoading(true);
-
-    try {
-      const input: AnswerPythonQuestionInput = { question };
-      const result = await answerPythonQuestion(input);
-      setChatHistory([...newHistory, { type: 'ai' as 'ai', text: result.answer }]);
-    } catch (error) {
-      console.error("AI Assistant Error:", error);
-      setChatHistory([...newHistory, { type: 'ai' as 'ai', text: "Sorry, I couldn't process your request right now." }]);
-      toast({ title: "AI Error", description: "Failed to get response from AI assistant.", variant: "destructive" });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed bottom-6 right-6 z-50">
-      {isOpen && (
-        <Card className="w-80 h-[400px] shadow-xl flex flex-col">
-          <CardHeader className="bg-primary text-primary-foreground p-4">
-            <CardTitle className="text-lg">PyRoutes AI Assistant</CardTitle>
-          </CardHeader>
-          <ScrollArea className="flex-grow p-4 space-y-3">
-            {chatHistory.map((entry, index) => (
-              <div key={index} className={`flex ${entry.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`p-2 rounded-lg max-w-[80%] text-sm ${entry.type === 'user' ? 'bg-primary/20' : 'bg-muted'}`}>
-                  {entry.text}
-                </div>
-              </div>
-            ))}
-            {isLoading && (
-              <div className="flex justify-start">
-                 <div className="p-2 rounded-lg bg-muted text-sm">Thinking... <Loader2 className="inline h-3 w-3 animate-spin"/></div>
-              </div>
-            )}
-          </ScrollArea>
-          <CardContent className="p-4 border-t">
-            <div className="flex gap-2">
-              <Input 
-                value={question} 
-                onChange={(e) => setQuestion(e.target.value)}
-                placeholder="Ask about Python..."
-                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                disabled={isLoading}
-              />
-              <Button onClick={handleSendMessage} disabled={isLoading || !question.trim()}>Send</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      <Button
-        size="icon"
-        className="rounded-full w-14 h-14 shadow-lg"
-        onClick={() => setIsOpen(!isOpen)}
-        aria-label={isOpen ? "Close AI Assistant" : "Open AI Assistant"}
-      >
-        {isOpen ? <Check className="h-6 w-6" /> : <MessageSquare className="h-6 w-6" />}
-      </Button>
-    </div>
-  );
-}
-
-
-export default function LessonPage() {
-  const params = useParams();
-  const router = useRouter();
-  const { lessonSlug } = params;
-  const [lesson, setLesson] = useState<Lesson | null>(null);
-  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
+export default function DashboardPage() {
   const { user, userProfile, loading: authLoading } = useAuth();
-  const { toast } = useToast();
+  const [lessons, setLessons] = useState<Lesson[]>(mockLessons); 
+  const [showLoadingSkeleton, setShowLoadingSkeleton] = useState(true);
 
   useEffect(() => {
-    if (lessonSlug) {
-      const foundLesson = mockLessons.find(l => l.slug === lessonSlug);
-      if (foundLesson) {
-        setLesson(foundLesson);
-      } else {
-        // Handle lesson not found, e.g., redirect or show 404
-        router.push("/lessons"); 
-      }
+    if (!authLoading) {
+      // Give a short moment for userProfile to potentially populate from auth context
+      const timer = setTimeout(() => setShowLoadingSkeleton(false), 200);
+      return () => clearTimeout(timer);
+    } else {
+      setShowLoadingSkeleton(true);
     }
-    // Simulate loading
-    const timer = setTimeout(() => setLoading(false), 300);
-    return () => clearTimeout(timer);
-  }, [lessonSlug, router]);
+  }, [authLoading]);
 
-  const handleExerciseSubmit = (exerciseId: string, code: string) => {
-    // This is where you'd integrate with an automated code grader.
-    // For now, just log it and potentially update local progress.
-    console.log(`Submitted code for exercise ${exerciseId}:`, code);
-    toast({ title: "Code Submitted!", description: "Your solution is being evaluated (simulated)." });
-    // Potentially update user progress in Firestore here
-  };
-  
-  const currentLessonIndex = mockLessons.findIndex(l => l.slug === lessonSlug);
-  const prevLesson = currentLessonIndex > 0 ? mockLessons[currentLessonIndex - 1] : null;
-  const nextLesson = currentLessonIndex < mockLessons.length - 1 ? mockLessons[currentLessonIndex + 1] : null;
-
-
-  if (authLoading || loading || !lesson) {
+  if (showLoadingSkeleton || authLoading) {
     return (
       <AppLayout>
-        <div className="container mx-auto py-8 px-4 md:px-6 lg:px-8 max-w-4xl">
-          <Skeleton className="h-10 w-3/4 mb-4" />
-          <Skeleton className="h-6 w-1/2 mb-8" />
-          <Skeleton className="h-48 w-full mb-6" />
-          <Skeleton className="h-32 w-full mb-6" />
-          <Skeleton className="h-64 w-full" />
+        <div className="container mx-auto py-8 px-4 md:px-6 lg:px-8">
+          <Skeleton className="h-10 w-1/3 mb-6" />
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 mb-8">
+            {[1,2,3].map(i => <Skeleton key={i} className="h-36 rounded-lg" />)}
+          </div>
+          <Skeleton className="h-8 w-1/4 mb-4" />
+          <div className="space-y-4">
+            {[1,2,3].map(i => <Skeleton key={i} className="h-24 rounded-lg" />)}
+          </div>
         </div>
-        <Suspense fallback={null}><ChatbotWidget /></Suspense>
       </AppLayout>
     );
   }
-  
-  const currentExercise = lesson.exercises[currentExerciseIndex];
+
+  const currentProgress = userProfile?.progress;
+  const totalLessons = lessons.length;
+  const completedLessonsCount = currentProgress?.completedLessons?.length || 0;
+  const overallProgress = totalLessons > 0 ? (completedLessonsCount / totalLessons) * 100 : 0;
+
+  const nextLesson = 
+    lessons.find(lesson => !currentProgress?.completedLessons?.includes(lesson.id)) || 
+    (currentProgress?.currentLesson ? lessons.find(l => l.id === currentProgress.currentLesson) : lessons[0]) ||
+    lessons[0]; // Fallback to the first lesson if others are undefined
+
 
   return (
     <AppLayout>
-      <div className="container mx-auto py-8 px-4 md:px-6 lg:px-8 max-w-4xl">
-        <Button variant="outline" onClick={() => router.push('/lessons')} className="mb-6">
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Lessons
-        </Button>
-        <article>
-          <header className="mb-8">
-            <h1 className="text-4xl font-bold mb-2 font-headline">{lesson.title}</h1>
-            <p className="text-lg text-muted-foreground">{lesson.description}</p>
-            <div className="mt-2 text-sm text-muted-foreground">
-              <span>{lesson.category}</span> &middot; <span>Estimated time: {lesson.estimatedTime}</span>
-            </div>
-          </header>
+      <div className="container mx-auto py-8 px-4 md:px-6 lg:px-8">
+        <h1 className="text-3xl font-bold mb-2 font-headline">
+          Welcome back, {userProfile?.displayName || user?.displayName || "Learner"}!
+        </h1>
+        <p className="text-muted-foreground mb-8 text-lg">
+          Continue your Python journey and track your progress.
+        </p>
 
-          <LessonContentDisplay content={lesson.content} />
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 mb-8">
+          <Card className="shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Overall Progress</CardTitle>
+              <BookOpen className="h-5 w-5 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{completedLessonsCount} / {totalLessons} Lessons</div>
+              <Progress value={overallProgress} className="mt-2 h-3" />
+              <p className="text-xs text-muted-foreground mt-1">
+                {Math.round(overallProgress)}% completed
+              </p>
+            </CardContent>
+          </Card>
 
-          {lesson.exercises.length > 0 && (
-            <section className="mt-12">
-              <h2 className="text-2xl font-semibold mb-4 font-headline">Exercises</h2>
-               {currentExercise && (
-                 <ExerciseAttempt exercise={currentExercise} onSubmit={handleExerciseSubmit} />
-               )}
-              <div className="mt-4 flex justify-between">
-                <Button 
-                  onClick={() => setCurrentExerciseIndex(prev => Math.max(0, prev -1))} 
-                  disabled={currentExerciseIndex === 0}
-                  variant="outline"
-                >
-                  <ArrowLeft className="mr-2 h-4 w-4"/> Previous Exercise
+          <Card className="shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Completed Lessons</CardTitle>
+              <CheckCircle className="h-5 w-5 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{completedLessonsCount}</div>
+              <p className="text-xs text-muted-foreground">
+                Keep up the great work!
+              </p>
+            </CardContent>
+          </Card>
+          
+          {nextLesson && (
+            <Card className="shadow-md bg-primary/10 border-primary">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-primary-foreground">Next Lesson</CardTitle>
+                <Zap className="h-5 w-5 text-primary-foreground/80" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-xl font-semibold text-primary-foreground">{nextLesson.title}</div>
+                <p className="text-xs text-primary-foreground/80 mb-3">
+                  {nextLesson.description}
+                </p>
+                <Button asChild size="sm" variant="default" className="bg-primary text-primary-foreground hover:bg-primary/90">
+                  <Link href={`/lessons/${nextLesson.slug}`}>Start Lesson</Link>
                 </Button>
-                <span className="text-sm text-muted-foreground self-center">
-                  Exercise {currentExerciseIndex + 1} of {lesson.exercises.length}
-                </span>
-                <Button 
-                  onClick={() => setCurrentExerciseIndex(prev => Math.min(lesson.exercises.length -1, prev + 1))}
-                  disabled={currentExerciseIndex === lesson.exercises.length - 1}
-                  variant="outline"
-                >
-                  Next Exercise <ArrowRight className="ml-2 h-4 w-4"/>
-                </Button>
-              </div>
-            </section>
+              </CardContent>
+            </Card>
           )}
-        </article>
-        
-        <div className="mt-12 pt-8 border-t flex justify-between">
-            {prevLesson ? (
-                <Button variant="outline" asChild>
-                    <Link href={`/lessons/${prevLesson.slug}`}>
-                        <ArrowLeft className="mr-2 h-4 w-4" /> Previous: {prevLesson.title}
-                    </Link>
-                </Button>
-            ) : <div /> }
-            {nextLesson ? (
-                 <Button variant="default" asChild>
-                    <Link href={`/lessons/${nextLesson.slug}`}>
-                        Next: {nextLesson.title} <ArrowRight className="ml-2 h-4 w-4" />
-                    </Link>
-                </Button>
-            ) : (
-                <Button variant="default" onClick={() => router.push('/lessons')}>
-                    <Check className="mr-2 h-4 w-4" /> All Lessons Completed!
-                </Button>
-            )}
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-4 font-headline">Available Lessons</h2>
+          {lessons.length > 0 ? (
+            <div className="space-y-4">
+              {lessons.map((lesson) => (
+                <Card key={lesson.id} className="shadow-md hover:shadow-lg transition-shadow">
+                  <CardContent className="p-4 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold">{lesson.title}</h3>
+                      <p className="text-sm text-muted-foreground">{lesson.description}</p>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        <span>{lesson.category}</span> &middot; <span>{lesson.estimatedTime}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {currentProgress?.completedLessons?.includes(lesson.id) && (
+                        <CheckCircle className="h-5 w-5 text-green-500" />
+                      )}
+                       <Button asChild variant={currentProgress?.completedLessons?.includes(lesson.id) ? "outline" : "default"}>
+                        <Link href={`/lessons/${lesson.slug}`}>
+                          {currentProgress?.completedLessons?.includes(lesson.id) ? "Review" : "Start"}
+                        </Link>
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted-foreground">No lessons available yet. Check back soon!</p>
+          )}
         </div>
       </div>
-      <Suspense fallback={null}><ChatbotWidget /></Suspense>
     </AppLayout>
   );
 }
