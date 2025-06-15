@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { Lesson, LessonContentPart, Exercise, UserProgress } from "@/lib/types";
-import { ArrowLeft, ArrowRight, Check, Lightbulb, MessageSquare, Sparkles, Code, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Lightbulb, MessageSquare, Sparkles, Code, Loader2, BookOpen } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import React, { useEffect, useState, Suspense } from "react";
@@ -17,6 +17,8 @@ import { answerPythonQuestion, AnswerPythonQuestionInput } from "@/ai/flows/answ
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Progress } from "@/components/ui/progress"; // Added for the embedded DashboardPage part
+import { CheckCircle, Zap } from "lucide-react"; // Added for the embedded DashboardPage part
 
 
 const mockLessons: Lesson[] = [
@@ -281,15 +283,336 @@ const mockLessons: Lesson[] = [
   }
 ];
 
+function LessonPageContent() {
+  const params = useParams();
+  const router = useRouter();
+  const { toast } = useToast();
+  const { user, userProfile, updateUserProgress, loading: authLoading } = useAuth();
 
-export default function DashboardPage() {
+  const [lesson, setLesson] = useState<Lesson | null>(null);
+  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
+  const [userCode, setUserCode] = useState<Record<string, string>>({}); // exerciseId: code
+  const [exerciseFeedback, setExerciseFeedback] = useState<Record<string, { correct: boolean | null, message?: string }>>({});
+  const [isLoading, setIsLoading] = useState(true);
+  
+  const [aiQuestion, setAiQuestion] = useState("");
+  const [aiAnswer, setAiAnswer] = useState("");
+  const [isAiLoading, setIsAiLoading] = useState(false);
+
+  useEffect(() => {
+    const lessonSlug = params.lessonSlug as string;
+    const foundLesson = mockLessons.find(l => l.slug === lessonSlug);
+    if (foundLesson) {
+      setLesson(foundLesson);
+      const initialCode: Record<string, string> = {};
+      foundLesson.exercises.forEach(ex => {
+        initialCode[ex.id] = ex.starterCode;
+      });
+      setUserCode(initialCode);
+      
+      // Update current lesson in user's progress if it's different
+      if (userProfile?.progress?.currentLesson !== foundLesson.id) {
+        updateUserProgress({ currentLesson: foundLesson.id });
+      }
+
+    } else {
+      router.push('/lessons'); // Or a 404 page
+    }
+    setIsLoading(false);
+  }, [params.lessonSlug, router, userProfile, updateUserProgress]);
+
+  const handleCodeChange = (exerciseId: string, code: string) => {
+    setUserCode(prev => ({ ...prev, [exerciseId]: code }));
+    setExerciseFeedback(prev => ({...prev, [exerciseId]: { correct: null }})); // Reset feedback on code change
+  };
+
+  const handleRunCode = (exercise: Exercise) => {
+    // Simplified: For now, we'll just check if the solution is somewhat included or if it's not empty
+    // In a real app, this would involve a backend execution environment or more complex client-side checks.
+    const studentCode = userCode[exercise.id]?.trim();
+    const solutionCode = exercise.solution?.trim();
+    
+    // Basic check: If solution exists, check if user code is similar or not empty.
+    // This is very naive and for demo purposes only.
+    let isCorrect = false;
+    let feedbackMessage = "Keep trying!";
+
+    if (solutionCode) {
+      if (studentCode === solutionCode) {
+        isCorrect = true;
+        feedbackMessage = "Excellent! Your solution is correct.";
+      } else if (studentCode && studentCode.length > (solutionCode.length / 2)) {
+        // Heuristic: if it's somewhat long and different, maybe it's a good attempt.
+        isCorrect = true; // Let's be generous for demo
+        feedbackMessage = "Good attempt! Check the solution if you're stuck.";
+      } else if (studentCode) {
+        feedbackMessage = "Your code seems a bit different from the solution. Try to match the logic.";
+      } else {
+        feedbackMessage = "Looks like you haven't written any code yet.";
+      }
+    } else if (studentCode) { // No solution provided, just check if code was written
+      isCorrect = true;
+      feedbackMessage = "Code submitted. No automated check for this exercise.";
+    }
+
+    setExerciseFeedback(prev => ({
+      ...prev,
+      [exercise.id]: { correct: isCorrect, message: feedbackMessage }
+    }));
+
+    if (isCorrect) {
+      toast({ title: "Exercise Check", description: feedbackMessage });
+      // Optionally, save exercise completion status to user progress
+      if(user && lesson) {
+        const newScores = {
+          ...(userProfile?.progress?.exerciseScores || {}),
+          [exercise.id]: { score: 100, completed: true, lastAttempt: studentCode }
+        };
+        updateUserProgress({ exerciseScores: newScores });
+      }
+    } else {
+       toast({ title: "Exercise Check", description: feedbackMessage, variant: "destructive" });
+    }
+  };
+
+  const handleNext = async () => {
+    if (!lesson || !user) return;
+
+    const currentCompletedLessons = userProfile?.progress?.completedLessons || [];
+    const newCompletedLessons = Array.from(new Set([...currentCompletedLessons, lesson.id]));
+
+    if (currentExerciseIndex < lesson.exercises.length - 1) {
+      setCurrentExerciseIndex(prev => prev + 1);
+      await updateUserProgress({ completedLessons: newCompletedLessons, currentLesson: lesson.id });
+    } else {
+      // Last exercise, move to next lesson or dashboard
+      const currentLessonIndexInMock = mockLessons.findIndex(l => l.id === lesson.id);
+      const nextLessonInMock = mockLessons[currentLessonIndexInMock + 1];
+      
+      if (nextLessonInMock) {
+        await updateUserProgress({ completedLessons: newCompletedLessons, currentLesson: nextLessonInMock.id });
+        router.push(`/lessons/${nextLessonInMock.slug}`);
+      } else {
+        await updateUserProgress({ completedLessons: newCompletedLessons, currentLesson: undefined });
+        toast({ title: "Lesson Series Completed!", description: "Great job! You've finished all available lessons in this series." });
+        router.push('/dashboard');
+      }
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentExerciseIndex > 0) {
+      setCurrentExerciseIndex(prev => prev - 1);
+    }
+  };
+
+  const handleAskAI = async () => {
+    if (!aiQuestion.trim()) return;
+    setIsAiLoading(true);
+    setAiAnswer("");
+    try {
+      const input: AnswerPythonQuestionInput = { question: aiQuestion };
+      const result = await answerPythonQuestion(input);
+      setAiAnswer(result.answer);
+    } catch (error) {
+      console.error("AI Question Error:", error);
+      setAiAnswer("Sorry, I couldn't process your question right now. Please try again.");
+      toast({ title: "AI Error", description: "Could not get an answer from the AI.", variant: "destructive" });
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const renderContentPart = (part: LessonContentPart, index: number) => {
+    switch (part.type) {
+      case 'heading':
+        const Tag = `h${part.level || 2}` as keyof JSX.IntrinsicElements;
+        return <Tag key={index} className={`font-headline mt-6 mb-3 ${part.level === 1 ? 'text-3xl' : part.level === 2 ? 'text-2xl' : 'text-xl'} font-bold`}>{part.value}</Tag>;
+      case 'text':
+        return <p key={index} className="mb-4 text-base leading-relaxed" dangerouslySetInnerHTML={{ __html: part.value.replace(/`([^`]+)`/g, '<code class="bg-muted px-1 py-0.5 rounded text-sm font-mono">$1</code>') }} />;
+      case 'code':
+        return (
+          <pre key={index} className="bg-muted p-4 rounded-md overflow-x-auto text-sm mb-4">
+            <code className={`language-${part.language || 'python'} font-code`}>{part.value}</code>
+          </pre>
+        );
+      default:
+        return null;
+    }
+  };
+  
+  if (isLoading || authLoading || !lesson) {
+    return (
+      <AppLayout>
+        <div className="container mx-auto py-8 px-4 md:px-6 lg:px-8">
+          <Skeleton className="h-10 w-3/4 mb-4" />
+          <Skeleton className="h-6 w-1/2 mb-8" />
+          <div className="grid md:grid-cols-2 gap-8">
+            <div>
+              <Skeleton className="h-48 w-full mb-4" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+            <div>
+              <Skeleton className="h-72 w-full" />
+            </div>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const currentExercise = lesson.exercises[currentExerciseIndex];
+  const isLastExercise = currentExerciseIndex === lesson.exercises.length - 1;
+
+  return (
+    <AppLayout>
+      <div className="container mx-auto py-8 px-4 md:px-6 lg:px-8 max-w-6xl">
+        <div className="mb-8">
+          <Link href="/lessons" className="text-sm text-primary hover:underline flex items-center gap-1">
+            <ArrowLeft className="h-4 w-4" /> Back to All Lessons
+          </Link>
+          <h1 className="text-4xl font-bold mt-2 mb-2 font-headline">{lesson.title}</h1>
+          <p className="text-muted-foreground text-lg">{lesson.description}</p>
+           <div className="mt-1 text-xs text-muted-foreground">
+              <span>{lesson.category}</span> &middot; <span>Estimated time: {lesson.estimatedTime}</span>
+            </div>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2">
+            <Card className="shadow-lg">
+              <CardHeader>
+                <CardTitle className="font-headline text-2xl">Lesson Content</CardTitle>
+              </CardHeader>
+              <CardContent className="prose prose-lg max-w-none">
+                {lesson.content.map(renderContentPart)}
+              </CardContent>
+            </Card>
+
+            {currentExercise && (
+              <Card className="mt-8 shadow-lg">
+                <CardHeader>
+                  <CardTitle className="font-headline text-2xl">
+                    Exercise {currentExerciseIndex + 1} of {lesson.exercises.length}: {currentExercise.description}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Textarea
+                    value={userCode[currentExercise.id] || ''}
+                    onChange={(e) => handleCodeChange(currentExercise.id, e.target.value)}
+                    placeholder="Write your Python code here..."
+                    rows={8}
+                    className="font-mono text-sm bg-background border-input"
+                  />
+                  <div className="mt-4 flex gap-2">
+                    <Button onClick={() => handleRunCode(currentExercise)} disabled={isAiLoading}>
+                      <Code className="mr-2 h-4 w-4" /> Run Code
+                    </Button>
+                     <Button variant="outline" onClick={() => setUserCode(prev => ({...prev, [currentExercise.id]: currentExercise.starterCode}))}>
+                      Reset Code
+                    </Button>
+                  </div>
+                  {exerciseFeedback[currentExercise.id]?.message && (
+                     <Alert className={`mt-4 ${exerciseFeedback[currentExercise.id]?.correct ? 'border-green-500' : 'border-destructive'}`}>
+                       <AlertTitle className={exerciseFeedback[currentExercise.id]?.correct ? 'text-green-700' : 'text-destructive'}>
+                         {exerciseFeedback[currentExercise.id]?.correct ? "Feedback" : "Needs Improvement"}
+                       </AlertTitle>
+                       <AlertDescription>
+                         {exerciseFeedback[currentExercise.id]?.message}
+                       </AlertDescription>
+                     </Alert>
+                  )}
+                </CardContent>
+                <CardContent className="border-t pt-6">
+                   <div className="flex justify-between items-center">
+                    <Button onClick={handlePrev} disabled={currentExerciseIndex === 0} variant="outline">
+                      <ArrowLeft className="mr-2 h-4 w-4" /> Previous
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      Exercise {currentExerciseIndex + 1} / {lesson.exercises.length}
+                    </span>
+                    <Button onClick={handleNext} className="bg-primary hover:bg-primary/90">
+                      {isLastExercise ? "Finish & Go to Dashboard" : "Next Exercise"}
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          <div className="lg:col-span-1 sticky top-24 self-start">
+            <Card className="shadow-lg">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 font-headline">
+                  <Sparkles className="h-6 w-6 text-accent" /> AI Assistant
+                </CardTitle>
+                <CardDescription>Stuck? Ask a question about this Python concept.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Textarea
+                  value={aiQuestion}
+                  onChange={(e) => setAiQuestion(e.target.value)}
+                  placeholder="e.g., What's the difference between a list and a tuple?"
+                  rows={3}
+                  disabled={isAiLoading}
+                  className="bg-background border-input"
+                />
+                <Button onClick={handleAskAI} className="mt-3 w-full" disabled={isAiLoading || !aiQuestion.trim()}>
+                  {isAiLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Ask AI
+                </Button>
+                { (isAiLoading || aiAnswer) && (
+                  <ScrollArea className="mt-4 h-[200px] w-full rounded-md border p-3 bg-muted/50 text-sm">
+                    {isAiLoading && (
+                      <div className="flex justify-start">
+                         <div className="p-2 rounded-lg bg-muted text-sm">Thinking... <Loader2 className="inline h-3 w-3 animate-spin"/></div>
+                      </div>
+                    )}
+                    {aiAnswer && <div className="whitespace-pre-wrap">{aiAnswer}</div>}
+                  </ScrollArea>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </AppLayout>
+  );
+}
+
+
+// This is a temporary workaround for the hydration error with Suspense and useParams.
+// The issue seems to be that useParams might return null on initial server render.
+export default function LessonPageWithSuspense() {
+  // Ensure params are available before rendering the main content
+  const params = useParams();
+  if (!params.lessonSlug) {
+    // You could return a loading skeleton here too if desired,
+    // or rely on the AppLayout's loading state if appropriate.
+    return (
+      <AppLayout>
+        <div className="container mx-auto py-8 px-4">Loading lesson...</div>
+      </AppLayout>
+    );
+  }
+  return <LessonPageContent />;
+}
+
+
+// NOTE: The DashboardPage component below seems to be a leftover or misplaced.
+// The main dashboard is at /src/app/dashboard/page.tsx.
+// This definition might cause confusion or errors if not intended.
+// For now, it's kept to match the provided file structure, but should be reviewed.
+// If this page is meant to be just the lesson display, this DashboardPage component should be removed.
+
+export function DashboardPage() {
   const { user, userProfile, loading: authLoading } = useAuth();
   const [lessons, setLessons] = useState<Lesson[]>(mockLessons); 
   const [showLoadingSkeleton, setShowLoadingSkeleton] = useState(true);
 
   useEffect(() => {
     if (!authLoading) {
-      // Give a short moment for userProfile to potentially populate from auth context
       const timer = setTimeout(() => setShowLoadingSkeleton(false), 200);
       return () => clearTimeout(timer);
     } else {
@@ -322,7 +645,7 @@ export default function DashboardPage() {
   const nextLesson = 
     lessons.find(lesson => !currentProgress?.completedLessons?.includes(lesson.id)) || 
     (currentProgress?.currentLesson ? lessons.find(l => l.id === currentProgress.currentLesson) : lessons[0]) ||
-    lessons[0]; // Fallback to the first lesson if others are undefined
+    lessons[0]; 
 
 
   return (
