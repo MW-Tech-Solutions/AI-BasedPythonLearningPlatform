@@ -3,12 +3,12 @@
 
 import type { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore'; // Added updateDoc, setDoc
+import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
 import { useRouter, usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
-import React, { createContext, useEffect, useState } from 'react';
+import React, { createContext, useEffect, useState, useCallback } from 'react'; // Added useCallback
 import { auth, db } from './firebase';
-import type { UserProfile, UserProgress } from './types'; // Added UserProgress
+import type { UserProfile, UserProgress } from './types';
 
 interface AuthContextType {
   user: FirebaseUser | null;
@@ -23,7 +23,7 @@ export const AuthContext = createContext<AuthContextType>({
   userProfile: null,
   loading: true,
   isAuthenticated: false,
-  updateUserProgress: async () => {}, // Default empty implementation
+  updateUserProgress: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -33,25 +33,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const updateUserProgress = async (progressUpdates: Partial<UserProgress>) => {
-    if (!user) { // userProfile might not be fully loaded yet, but user should exist
-      console.error("User not available for updating progress.");
+  const updateUserProgress = useCallback(async (progressUpdates: Partial<UserProgress>) => {
+    if (!user) {
+      console.warn("User not authenticated, cannot update progress. Attempted updates:", progressUpdates);
       return;
     }
-
-    // Fetch the latest profile again to ensure we're not overwriting concurrently, or rely on local state
-    // For simplicity, we'll rely on the local userProfile state for the current progress base.
-    // A more robust solution might re-fetch or use transactions if concurrent updates are a concern.
-    const baseProfile = userProfile; 
-    if (!baseProfile) {
-        console.error("UserProfile not loaded, cannot update progress.");
-        return;
+    // userProfile is a dependency of this useCallback, so if it's null here,
+    // it means it was null when this specific instance of updateUserProgress was created.
+    // Effects calling this should ideally wait for userProfile to be available.
+    if (!userProfile) {
+      console.warn("UserProfile not yet loaded when updateUserProgress was defined, cannot update progress. Attempted updates:", progressUpdates);
+      return;
     }
 
     try {
       const userDocRef = doc(db, "users", user.uid);
       
-      const currentProgress = baseProfile.progress || { 
+      const currentProgress = userProfile.progress || { 
         completedLessons: [], 
         exerciseScores: {}, 
         quizScores: {},
@@ -63,16 +61,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ...progressUpdates,
       };
 
+      // If completedLessons is part of the update, ensure it's merged correctly as a Set.
       if (progressUpdates.completedLessons) {
-        newProgressState.completedLessons = Array.from(new Set(progressUpdates.completedLessons));
+        newProgressState.completedLessons = Array.from(new Set([
+          ...(currentProgress.completedLessons || []),
+          ...(progressUpdates.completedLessons || [])
+        ]));
       }
+
 
       await updateDoc(userDocRef, {
         progress: newProgressState,
       });
 
       setUserProfile(prevProfile => {
-        if (!prevProfile) return null; // Should not happen if user is set
+        if (!prevProfile) return null; 
         return {
           ...prevProfile,
           progress: newProgressState,
@@ -82,10 +85,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error("Error updating user progress:", error);
       throw error;
     }
-  };
+  }, [user, userProfile]); // updateUserProgress depends on user and userProfile
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setLoading(true); // Start loading when auth state changes
       if (firebaseUser) {
         setUser(firebaseUser);
         const userDocRef = doc(db, "users", firebaseUser.uid);
@@ -93,55 +97,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const userDocSnap = await getDoc(userDocRef);
           if (userDocSnap.exists()) {
             let profileData = userDocSnap.data() as UserProfile;
-            if (!profileData.progress) {
-              // console.log(`User ${firebaseUser.uid} is missing progress object. Initializing and backfilling.`);
+            // Ensure progress object and its fields are initialized
+            const currentProgress = profileData.progress;
+            if (!currentProgress || 
+                !currentProgress.hasOwnProperty('completedLessons') ||
+                !currentProgress.hasOwnProperty('exerciseScores') ||
+                !currentProgress.hasOwnProperty('quizScores')) {
               const defaultProgress: UserProgress = {
-                completedLessons: [],
-                exerciseScores: {},
-                quizScores: {},
-                currentLesson: undefined, // Or a sensible default like the first lesson ID
+                completedLessons: currentProgress?.completedLessons || [],
+                exerciseScores: currentProgress?.exerciseScores || {},
+                quizScores: currentProgress?.quizScores || {},
+                currentLesson: currentProgress?.currentLesson || undefined, 
               };
               profileData = { ...profileData, progress: defaultProgress };
-              // Persist this backfilled progress to Firestore
               await updateDoc(userDocRef, { progress: defaultProgress });
             }
             setUserProfile(profileData);
           } else {
-            // This case should ideally be handled by signup or if a user doc was manually deleted.
-            // For robustness, create a default profile here if it's missing.
-            // console.log(`User document for ${firebaseUser.uid} not found. Creating default profile.`);
-            const defaultProfile: UserProfile = {
+            const defaultProgress: UserProgress = {
+                completedLessons: [], exerciseScores: {}, quizScores: {}, currentLesson: "1", // Start with lesson 1
+            };
+            const defaultProfileData: UserProfile = {
               uid: firebaseUser.uid,
               displayName: firebaseUser.displayName,
               email: firebaseUser.email,
               photoURL: firebaseUser.photoURL,
               createdAt: new Date(), 
-              progress: {
-                completedLessons: [],
-                exerciseScores: {},
-                quizScores: {},
-                currentLesson: undefined,
-              },
+              progress: defaultProgress,
             };
-            await setDoc(userDocRef, defaultProfile); // Create the document
-            setUserProfile(defaultProfile);
+            await setDoc(userDocRef, defaultProfileData);
+            setUserProfile(defaultProfileData);
           }
         } catch (error) {
             console.error("Error fetching/setting user profile:", error);
-            setUserProfile({ // Fallback minimal profile
+             const fallbackProgress: UserProgress = { completedLessons: [], exerciseScores: {}, quizScores: {} };
+             setUserProfile({
                 uid: firebaseUser.uid,
                 displayName: firebaseUser.displayName,
                 email: firebaseUser.email,
                 photoURL: firebaseUser.photoURL,
                 createdAt: new Date(),
-                progress: { completedLessons: [], exerciseScores: {}, quizScores: {} }
+                progress: fallbackProgress
             });
         }
       } else {
         setUser(null);
         setUserProfile(null);
       }
-      setLoading(false);
+      setLoading(false); // Finished processing auth state
     });
 
     return () => unsubscribe();

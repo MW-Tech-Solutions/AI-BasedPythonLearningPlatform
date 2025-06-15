@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { Lesson, LessonContentPart, Exercise, UserProgress } from "@/lib/types";
-import { ArrowLeft, ArrowRight, Check, Lightbulb, MessageSquare, Sparkles, Code, Loader2, BookOpen } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Lightbulb, MessageSquare, Sparkles, Code, Loader2, BookOpen, CheckCircle, Zap } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import React, { useEffect, useState, Suspense } from "react";
@@ -17,8 +17,7 @@ import { answerPythonQuestion, AnswerPythonQuestionInput } from "@/ai/flows/answ
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Progress } from "@/components/ui/progress"; // Added for the embedded DashboardPage part
-import { CheckCircle, Zap } from "lucide-react"; // Added for the embedded DashboardPage part
+import { Progress } from "@/components/ui/progress"; 
 
 
 const mockLessons: Lesson[] = [
@@ -291,17 +290,24 @@ function LessonPageContent() {
 
   const [lesson, setLesson] = useState<Lesson | null>(null);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
-  const [userCode, setUserCode] = useState<Record<string, string>>({}); // exerciseId: code
+  const [userCode, setUserCode] = useState<Record<string, string>>({});
   const [exerciseFeedback, setExerciseFeedback] = useState<Record<string, { correct: boolean | null, message?: string }>>({});
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // Local loading state for lesson content
   
   const [aiQuestion, setAiQuestion] = useState("");
   const [aiAnswer, setAiAnswer] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
 
   useEffect(() => {
+    if (authLoading) {
+      setIsLoading(true); // Reflect auth loading in local state
+      return;
+    }
+    // Auth is no longer loading
+
     const lessonSlug = params.lessonSlug as string;
     const foundLesson = mockLessons.find(l => l.slug === lessonSlug);
+
     if (foundLesson) {
       setLesson(foundLesson);
       const initialCode: Record<string, string> = {};
@@ -310,30 +316,34 @@ function LessonPageContent() {
       });
       setUserCode(initialCode);
       
-      // Update current lesson in user's progress if it's different
-      if (userProfile?.progress?.currentLesson !== foundLesson.id) {
-        updateUserProgress({ currentLesson: foundLesson.id });
-      }
+      if (user && userProfile) {
+        const currentProgress = userProfile.progress;
+        const needsUpdate = !currentProgress || 
+                            currentProgress.currentLesson !== foundLesson.id ||
+                            (currentProgress && !currentProgress.hasOwnProperty('currentLesson'));
 
+        if (needsUpdate) {
+          updateUserProgress({ currentLesson: foundLesson.id });
+        }
+      }
+      setIsLoading(false); // Lesson data set up
     } else {
-      router.push('/lessons'); // Or a 404 page
+      // Lesson not found, and auth is resolved, so redirect
+      router.push('/lessons'); 
+      // No need to setIsLoading(false) here as component will unmount or redirect.
     }
-    setIsLoading(false);
-  }, [params.lessonSlug, router, userProfile, updateUserProgress]);
+  }, [params.lessonSlug, router, user, userProfile, updateUserProgress, authLoading]);
+
 
   const handleCodeChange = (exerciseId: string, code: string) => {
     setUserCode(prev => ({ ...prev, [exerciseId]: code }));
-    setExerciseFeedback(prev => ({...prev, [exerciseId]: { correct: null }})); // Reset feedback on code change
+    setExerciseFeedback(prev => ({...prev, [exerciseId]: { correct: null }}));
   };
 
   const handleRunCode = (exercise: Exercise) => {
-    // Simplified: For now, we'll just check if the solution is somewhat included or if it's not empty
-    // In a real app, this would involve a backend execution environment or more complex client-side checks.
     const studentCode = userCode[exercise.id]?.trim();
     const solutionCode = exercise.solution?.trim();
     
-    // Basic check: If solution exists, check if user code is similar or not empty.
-    // This is very naive and for demo purposes only.
     let isCorrect = false;
     let feedbackMessage = "Keep trying!";
 
@@ -342,15 +352,14 @@ function LessonPageContent() {
         isCorrect = true;
         feedbackMessage = "Excellent! Your solution is correct.";
       } else if (studentCode && studentCode.length > (solutionCode.length / 2)) {
-        // Heuristic: if it's somewhat long and different, maybe it's a good attempt.
-        isCorrect = true; // Let's be generous for demo
+        isCorrect = true; 
         feedbackMessage = "Good attempt! Check the solution if you're stuck.";
       } else if (studentCode) {
         feedbackMessage = "Your code seems a bit different from the solution. Try to match the logic.";
       } else {
         feedbackMessage = "Looks like you haven't written any code yet.";
       }
-    } else if (studentCode) { // No solution provided, just check if code was written
+    } else if (studentCode) {
       isCorrect = true;
       feedbackMessage = "Code submitted. No automated check for this exercise.";
     }
@@ -362,10 +371,9 @@ function LessonPageContent() {
 
     if (isCorrect) {
       toast({ title: "Exercise Check", description: feedbackMessage });
-      // Optionally, save exercise completion status to user progress
-      if(user && lesson) {
+      if(user && lesson && userProfile) { // Ensure userProfile exists
         const newScores = {
-          ...(userProfile?.progress?.exerciseScores || {}),
+          ...(userProfile.progress?.exerciseScores || {}),
           [exercise.id]: { score: 100, completed: true, lastAttempt: studentCode }
         };
         updateUserProgress({ exerciseScores: newScores });
@@ -376,16 +384,15 @@ function LessonPageContent() {
   };
 
   const handleNext = async () => {
-    if (!lesson || !user) return;
+    if (!lesson || !user || !userProfile) return; // Ensure userProfile exists
 
-    const currentCompletedLessons = userProfile?.progress?.completedLessons || [];
+    const currentCompletedLessons = userProfile.progress?.completedLessons || [];
     const newCompletedLessons = Array.from(new Set([...currentCompletedLessons, lesson.id]));
 
     if (currentExerciseIndex < lesson.exercises.length - 1) {
       setCurrentExerciseIndex(prev => prev + 1);
       await updateUserProgress({ completedLessons: newCompletedLessons, currentLesson: lesson.id });
     } else {
-      // Last exercise, move to next lesson or dashboard
       const currentLessonIndexInMock = mockLessons.findIndex(l => l.id === lesson.id);
       const nextLessonInMock = mockLessons[currentLessonIndexInMock + 1];
       
@@ -441,7 +448,7 @@ function LessonPageContent() {
     }
   };
   
-  if (isLoading || authLoading || !lesson) {
+  if (authLoading || isLoading || !lesson) { // Use local isLoading as well
     return (
       <AppLayout>
         <div className="container mx-auto py-8 px-4 md:px-6 lg:px-8">
@@ -581,18 +588,12 @@ function LessonPageContent() {
   );
 }
 
-
-// This is a temporary workaround for the hydration error with Suspense and useParams.
-// The issue seems to be that useParams might return null on initial server render.
 export default function LessonPageWithSuspense() {
-  // Ensure params are available before rendering the main content
   const params = useParams();
   if (!params.lessonSlug) {
-    // You could return a loading skeleton here too if desired,
-    // or rely on the AppLayout's loading state if appropriate.
     return (
       <AppLayout>
-        <div className="container mx-auto py-8 px-4">Loading lesson...</div>
+        <div className="container mx-auto py-8 px-4">Loading lesson details...</div>
       </AppLayout>
     );
   }
@@ -601,11 +602,8 @@ export default function LessonPageWithSuspense() {
 
 
 // NOTE: The DashboardPage component below seems to be a leftover or misplaced.
-// The main dashboard is at /src/app/dashboard/page.tsx.
-// This definition might cause confusion or errors if not intended.
-// For now, it's kept to match the provided file structure, but should be reviewed.
-// If this page is meant to be just the lesson display, this DashboardPage component should be removed.
-
+// It is not used by the routing for this page.
+// It is being kept to avoid changing file structure beyond the error fix, but consider removal.
 export function DashboardPage() {
   const { user, userProfile, loading: authLoading } = useAuth();
   const [lessons, setLessons] = useState<Lesson[]>(mockLessons); 
