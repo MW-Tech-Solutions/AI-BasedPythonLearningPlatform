@@ -1,15 +1,30 @@
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth } from 'firebase/auth';
-import { getFirestore, Firestore } from 'firebase/firestore';
+import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
+import { getAuth, type Auth } from 'firebase/auth';
+import { getFirestore, type Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDfOXpW1iwvI9CUdlx-76Vl5ePlFCWx8Xk",
-  authDomain: "pyroutes-88ros.firebaseapp.com",
-  projectId: "pyroutes-88ros",
-  storageBucket: "pyroutes-88ros.firebasestorage.app",
-  messagingSenderId: "967827192083",
-  appId: "1:967827192083:web:45333f103b30e4e45702e6"
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
+
+// Ensure all firebase config values are present
+if (
+  !firebaseConfig.apiKey ||
+  !firebaseConfig.authDomain ||
+  !firebaseConfig.projectId ||
+  !firebaseConfig.storageBucket ||
+  !firebaseConfig.messagingSenderId ||
+  !firebaseConfig.appId
+) {
+  console.error("Firebase configuration is missing. Ensure all NEXT_PUBLIC_FIREBASE_ environment variables are set in .env.local");
+  // You might want to throw an error here or handle it more gracefully
+  // For now, we'll log an error and proceed, which will likely cause Firebase to fail initialization.
+}
+
 
 let app: FirebaseApp;
 if (!getApps().length) {
